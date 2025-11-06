@@ -15,12 +15,12 @@
 # You should have received a copy of the GNU General Public License along with
 # indicator-stickynotes.  If not, see <http://www.gnu.org/licenses/>.
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import json
 from os.path import expanduser
 
-from stickynotes.info import FALLBACK_PROPERTIES
+from stickynotes.info import FALLBACK_PROPERTIES, DEFAULT_TRASH_RETENTION_DAYS, DEFAULT_CONFIRM_DELETE
 
 class Note:
     def __init__(self, content=None, gui_class=None, noteset=None,
@@ -60,9 +60,9 @@ class Note:
             self.last_modified = datetime.now()
 
     def delete(self):
-        self.noteset.notes.remove(self)
+        """Move note to archive instead of permanent deletion"""
+        self.noteset.archive_note(self)
         self.noteset.save()
-        del self
 
     def show(self, *args, **kwargs):
         # If GUI has not been created, create it now
@@ -90,6 +90,7 @@ class Note:
 class NoteSet:
     def __init__(self, gui_class, data_file, indicator):
         self.notes = []
+        self.archived_notes = []  # Archive for deleted notes
         self.properties = {}
         self.categories = {}
         self.gui_class = gui_class
@@ -104,13 +105,26 @@ class NoteSet:
         """Loads notes into their respective objects"""
         notes = self._loads_updater(json.loads(snoteset))
         self.properties = notes.get("properties", {})
+        # Set default values for new properties
+        if "trash_retention_days" not in self.properties:
+            self.properties["trash_retention_days"] = DEFAULT_TRASH_RETENTION_DAYS
+        if "confirm_delete" not in self.properties:
+            self.properties["confirm_delete"] = DEFAULT_CONFIRM_DELETE
         self.categories = notes.get("categories", {})
         self.notes = [Note(note, gui_class=self.gui_class, noteset=self)
                 for note in notes.get("notes",[])]
+        # Load archived notes
+        self.archived_notes = notes.get("archived_notes", [])
+        # Clean up old archived notes
+        self.cleanup_old_archived_notes()
 
     def dumps(self):
-        return json.dumps({"notes":[x.extract() for x in self.notes],
-            "properties": self.properties, "categories": self.categories})
+        return json.dumps({
+            "notes": [x.extract() for x in self.notes],
+            "archived_notes": self.archived_notes,
+            "properties": self.properties,
+            "categories": self.categories
+        })
 
     def save(self, path=''):
         output = self.dumps()
@@ -177,6 +191,70 @@ class NoteSet:
         for note in self.notes:
             note.hide(*args)
         self.properties["all_visible"] = False
+    def archive_note(self, note):
+        """Move note to archive instead of permanent deletion"""
+        # Remove from active notes
+        if note in self.notes:
+            self.notes.remove(note)
+        
+        # Extract note data and add deletion timestamp
+        archived_data = note.extract()
+        archived_data["deleted_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        
+        # Add to archived notes
+        self.archived_notes.append(archived_data)
+        
+        # Hide GUI if exists
+        if note.gui:
+            note.gui.winMain.destroy()
+
+    def cleanup_old_archived_notes(self):
+        """Remove archived notes older than retention period"""
+        retention_days = self.properties.get("trash_retention_days", DEFAULT_TRASH_RETENTION_DAYS)
+        if retention_days <= 0:
+            return  # Keep notes forever if retention is 0 or negative
+        
+        cutoff_date = datetime.now() - timedelta(days=retention_days)
+        
+        # Filter out old archived notes
+        self.archived_notes = [
+            note for note in self.archived_notes
+            if datetime.strptime(note.get("deleted_at", "2000-01-01T00:00:00"), 
+                                "%Y-%m-%dT%H:%M:%S") > cutoff_date
+        ]
+
+    def restore_note(self, archived_note_uuid):
+        """Restore a note from archive"""
+        # Find the archived note
+        archived_note = None
+        for note in self.archived_notes:
+            if note.get("uuid") == archived_note_uuid:
+                archived_note = note
+                break
+        
+        if not archived_note:
+            return None
+        
+        # Remove from archive
+        self.archived_notes.remove(archived_note)
+        
+        # Remove deleted_at timestamp
+        if "deleted_at" in archived_note:
+            del archived_note["deleted_at"]
+        
+        # Create new note from archived data
+        restored_note = Note(archived_note, gui_class=self.gui_class, noteset=self)
+        self.notes.append(restored_note)
+        
+        # Save changes
+        self.save()
+        
+        return restored_note
+
+    def get_archived_notes(self):
+        """Get list of archived notes with their metadata"""
+        return self.archived_notes
+
 
     def get_category_property(self, cat, prop):
         """Get a property of a category or the default"""

@@ -272,19 +272,24 @@ class StickyNote:
         return False
 
     def delete(self, *args):
-        winConfirm = Gtk.MessageDialog(self.winMain, None,
-                Gtk.MessageType.QUESTION, Gtk.ButtonsType.NONE,
-                _("Are you sure you want to delete this note?"))
-        winConfirm.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.REJECT,
-                Gtk.STOCK_DELETE, Gtk.ResponseType.ACCEPT)
-        confirm = winConfirm.run()
-        winConfirm.destroy()
-        if confirm == Gtk.ResponseType.ACCEPT:
-            self.note.delete()
-            self.winMain.destroy()
-            return False
-        else:
-            return True
+        """Delete note (move to archive) with optional confirmation dialog"""
+        confirm_delete = self.noteset.properties.get("confirm_delete", False)
+        
+        if confirm_delete:
+            winConfirm = Gtk.MessageDialog(self.winMain, None,
+                    Gtk.MessageType.QUESTION, Gtk.ButtonsType.NONE,
+                    _("Are you sure you want to delete this note?"))
+            winConfirm.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.REJECT,
+                    Gtk.STOCK_DELETE, Gtk.ResponseType.ACCEPT)
+            confirm = winConfirm.run()
+            winConfirm.destroy()
+            if confirm != Gtk.ResponseType.ACCEPT:
+                return True
+        
+        # Delete note (moves to archive)
+        self.note.delete()
+        self.winMain.destroy()
+        return False
 
     def popup_menu(self, button, *args):
         """Pops up the note's menu"""
@@ -444,6 +449,10 @@ class SettingsDialog:
         widgets = ["wSettings", "boxCategories"]
         for w in widgets:
             setattr(self, w, self.builder.get_object(w))
+        
+        # Add archive settings
+        self.add_archive_settings()
+        
         for c in self.noteset.categories:
             self.add_category_widgets(c)
         ret =  self.wSettings.run()
@@ -470,7 +479,194 @@ class SettingsDialog:
             note.gui.populate_menu()
             note.gui.update_style()
             note.gui.update_font()
+    
+    def add_archive_settings(self):
+        """Add archive configuration widgets"""
+        # Create a frame for archive settings
+        frame = Gtk.Frame(label=_("Archive Settings"))
+        frame.set_margin_top(10)
+        frame.set_margin_bottom(10)
+        frame.set_margin_start(10)
+        frame.set_margin_end(10)
+        
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        vbox.set_margin_top(10)
+        vbox.set_margin_bottom(10)
+        vbox.set_margin_start(10)
+        vbox.set_margin_end(10)
+        
+        # Retention days setting
+        hbox1 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        label1 = Gtk.Label(label=_("Delete archived notes after (days):"))
+        label1.set_xalign(0)
+        self.spin_retention = Gtk.SpinButton()
+        self.spin_retention.set_range(0, 365)
+        self.spin_retention.set_increments(1, 7)
+        self.spin_retention.set_value(
+            self.noteset.properties.get("trash_retention_days", 30))
+        self.spin_retention.connect("value-changed", self.on_retention_changed)
+        hbox1.pack_start(label1, True, True, 0)
+        hbox1.pack_start(self.spin_retention, False, False, 0)
+        
+        label_hint = Gtk.Label()
+        label_hint.set_markup("<small><i>" + _("Set to 0 to keep notes forever") + "</i></small>")
+        label_hint.set_xalign(0)
+        
+        # Confirm delete setting
+        self.check_confirm = Gtk.CheckButton(label=_("Confirm before deleting notes"))
+        self.check_confirm.set_active(
+            self.noteset.properties.get("confirm_delete", False))
+        self.check_confirm.connect("toggled", self.on_confirm_changed)
+        
+        # View archive button
+        btn_view_archive = Gtk.Button(label=_("View Archive"))
+        btn_view_archive.connect("clicked", self.show_archive)
+        
+        vbox.pack_start(hbox1, False, False, 0)
+        vbox.pack_start(label_hint, False, False, 0)
+        vbox.pack_start(self.check_confirm, False, False, 0)
+        vbox.pack_start(btn_view_archive, False, False, 0)
+        
+        frame.add(vbox)
+        
+        # Insert at the top of the content area
+        content_area = self.wSettings.get_content_area()
+        content_area.pack_start(frame, False, False, 0)
+        content_area.reorder_child(frame, 0)
+        frame.show_all()
+    
+    def on_retention_changed(self, spinbutton):
+        """Update retention days setting"""
+        self.noteset.properties["trash_retention_days"] = int(spinbutton.get_value())
+        self.noteset.save()
+    
+    def on_confirm_changed(self, checkbutton):
+        """Update confirm delete setting"""
+        self.noteset.properties["confirm_delete"] = checkbutton.get_active()
+        self.noteset.save()
+    
+    def show_archive(self, *args):
+        """Show the archive dialog"""
+        ArchiveDialog(self.noteset)
 
     def refresh_category_titles(self):
         for cid, catsettings in self.categories.items():
             catsettings.refresh_title()
+
+class ArchiveDialog:
+    """Dialog to view and restore archived notes"""
+    def __init__(self, noteset):
+        self.noteset = noteset
+        self.path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        
+        # Create dialog
+        self.wArchive = Gtk.Dialog(_("Archived Notes"), None, 
+                                    Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT)
+        self.wArchive.set_default_size(600, 400)
+        
+        # Create scrolled window with list
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        
+        # Create list store: uuid, body preview, deleted date, full body
+        self.liststore = Gtk.ListStore(str, str, str, str)
+        self.treeview = Gtk.TreeView(model=self.liststore)
+        
+        # Add columns
+        renderer_text = Gtk.CellRendererText()
+        column_preview = Gtk.TreeViewColumn(_("Note Preview"), renderer_text, text=1)
+        column_preview.set_expand(True)
+        self.treeview.append_column(column_preview)
+        
+        column_date = Gtk.TreeViewColumn(_("Deleted"), renderer_text, text=2)
+        column_date.set_min_width(150)
+        self.treeview.append_column(column_date)
+        
+        scroll.add(self.treeview)
+        
+        # Populate list
+        self.populate_list()
+        
+        # Add buttons
+        content_area = self.wArchive.get_content_area()
+        content_area.pack_start(scroll, True, True, 0)
+        
+        self.wArchive.add_button(_("Close"), Gtk.ResponseType.CLOSE)
+        self.wArchive.add_button(_("Restore"), Gtk.ResponseType.ACCEPT)
+        self.wArchive.add_button(_("Delete Permanently"), Gtk.ResponseType.REJECT)
+        
+        self.wArchive.show_all()
+        
+        # Handle response
+        while True:
+            response = self.wArchive.run()
+            if response == Gtk.ResponseType.ACCEPT:
+                self.restore_selected()
+            elif response == Gtk.ResponseType.REJECT:
+                self.delete_selected()
+            else:
+                break
+        
+        self.wArchive.destroy()
+    
+    def populate_list(self):
+        """Populate the list with archived notes"""
+        self.liststore.clear()
+        archived = self.noteset.get_archived_notes()
+        
+        for note in archived:
+            body = note.get("body", "")
+            # Create preview (first 50 chars)
+            preview = body[:50].replace("\n", " ")
+            if len(body) > 50:
+                preview += "..."
+            
+            deleted_at = note.get("deleted_at", "")
+            if deleted_at:
+                try:
+                    dt = datetime.strptime(deleted_at, "%Y-%m-%dT%H:%M:%S")
+                    deleted_str = dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    deleted_str = deleted_at
+            else:
+                deleted_str = _("Unknown")
+            
+            self.liststore.append([note.get("uuid", ""), preview, deleted_str, body])
+    
+    def restore_selected(self):
+        """Restore the selected note"""
+        selection = self.treeview.get_selection()
+        model, treeiter = selection.get_selected()
+        
+        if treeiter:
+            uuid = model[treeiter][0]
+            restored = self.noteset.restore_note(uuid)
+            if restored:
+                restored.show()
+                self.populate_list()
+    
+    def delete_selected(self):
+        """Permanently delete the selected note"""
+        selection = self.treeview.get_selection()
+        model, treeiter = selection.get_selected()
+        
+        if treeiter:
+            uuid = model[treeiter][0]
+            # Confirm permanent deletion
+            winConfirm = Gtk.MessageDialog(self.wArchive, None,
+                    Gtk.MessageType.WARNING, Gtk.ButtonsType.NONE,
+                    _("Permanently delete this note? This cannot be undone!"))
+            winConfirm.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.REJECT,
+                    Gtk.STOCK_DELETE, Gtk.ResponseType.ACCEPT)
+            confirm = winConfirm.run()
+            winConfirm.destroy()
+            
+            if confirm == Gtk.ResponseType.ACCEPT:
+                # Remove from archived notes
+                self.noteset.archived_notes = [
+                    n for n in self.noteset.archived_notes 
+                    if n.get("uuid") != uuid
+                ]
+                self.noteset.save()
+                self.populate_list()
+
