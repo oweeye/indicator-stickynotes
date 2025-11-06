@@ -142,6 +142,15 @@ class IndicatorStickyNotes:
         self.menu.append(s)
         s.show()
 
+        self.mArchive = Gtk.MenuItem(_("Archive"))
+        self.menu.append(self.mArchive)
+        self.mArchive.connect("activate", self.show_archive, None)
+        self.mArchive.show()
+
+        s = Gtk.SeparatorMenuItem.new()
+        self.menu.append(s)
+        s.show()
+
         self.mAbout = Gtk.MenuItem(_("About"))
         self.menu.append(self.mAbout)
         self.mAbout.connect("activate", self.show_about, None)
@@ -248,6 +257,10 @@ class IndicatorStickyNotes:
 
     def show_settings(self, *args):
         wSettings = SettingsDialog(self.nset)
+
+    def show_archive(self, *args):
+        from stickynotes.gui import ArchiveDialog
+        ArchiveDialog(self.nset)
 
     def save(self):
         self.nset.save()
