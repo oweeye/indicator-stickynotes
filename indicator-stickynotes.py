@@ -28,7 +28,7 @@ gi.require_version('GtkSource', '3.0')
 try:
     gi.require_version('AyatanaAppIndicator3', '0.1')
     from gi.repository import AyatanaAppIndicator3 as appindicator
-except ImportError:
+except (ValueError, ImportError):
     gi.require_version('AppIndicator3', '0.1')
     from gi.repository import AppIndicator3 as appindicator
 from gi.repository import Gtk, Gdk
@@ -90,12 +90,12 @@ class IndicatorStickyNotes:
         # Delete/modify the following file when distributing as a package
         self.ind.set_icon_theme_path(os.path.abspath(os.path.join(
             os.path.dirname(__file__), 'Icons')))
-        self.ind.set_icon("indicator-stickynotes-mono")
+        self.ind.set_icon_full("indicator-stickynotes-mono", "Sticky Notes")
         self.ind.set_status(appindicator.IndicatorStatus.ACTIVE)
         self.ind.set_title(_("Sticky Notes"))
         # Create Menu
         self.menu = Gtk.Menu()
-        self.mNewNote = Gtk.MenuItem(_("New Note"))
+        self.mNewNote = Gtk.MenuItem(label=_("New Note"))
         self.menu.append(self.mNewNote)
         self.mNewNote.connect("activate", self.new_note, None)
         self.mNewNote.show()
@@ -104,12 +104,12 @@ class IndicatorStickyNotes:
         self.menu.append(s)
         s.show()
 
-        self.mShowAll = Gtk.MenuItem(_("Show All"))
+        self.mShowAll = Gtk.MenuItem(label=_("Show All"))
         self.menu.append(self.mShowAll)
         self.mShowAll.connect("activate", self.showall, None)
         self.mShowAll.show()
 
-        self.mHideAll = Gtk.MenuItem(_("Hide All"))
+        self.mHideAll = Gtk.MenuItem(label=_("Hide All"))
         self.menu.append(self.mHideAll)
         self.mHideAll.connect("activate", self.hideall, None)
         self.mHideAll.show()
@@ -118,12 +118,12 @@ class IndicatorStickyNotes:
         self.menu.append(s)
         s.show()
 
-        self.mLockAll = Gtk.MenuItem(_("Lock All"))
+        self.mLockAll = Gtk.MenuItem(label=_("Lock All"))
         self.menu.append(self.mLockAll)
         self.mLockAll.connect("activate", self.lockall, None)
         self.mLockAll.show()
 
-        self.mUnlockAll = Gtk.MenuItem(_("Unlock All"))
+        self.mUnlockAll = Gtk.MenuItem(label=_("Unlock All"))
         self.menu.append(self.mUnlockAll)
         self.mUnlockAll.connect("activate", self.unlockall, None)
         self.mUnlockAll.show()
@@ -132,12 +132,12 @@ class IndicatorStickyNotes:
         self.menu.append(s)
         s.show()
 
-        self.mExport = Gtk.MenuItem(_("Export Data"))
+        self.mExport = Gtk.MenuItem(label=_("Export Data"))
         self.menu.append(self.mExport)
         self.mExport.connect("activate", self.export_datafile, None)
         self.mExport.show()
 
-        self.mImport = Gtk.MenuItem(_("Import Data"))
+        self.mImport = Gtk.MenuItem(label=_("Import Data"))
         self.menu.append(self.mImport)
         self.mImport.connect("activate", self.import_datafile, None)
         self.mImport.show()
@@ -146,7 +146,7 @@ class IndicatorStickyNotes:
         self.menu.append(s)
         s.show()
 
-        self.mArchive = Gtk.MenuItem(_("Archive"))
+        self.mArchive = Gtk.MenuItem(label=_("Archive"))
         self.menu.append(self.mArchive)
         self.mArchive.connect("activate", self.show_archive, None)
         self.mArchive.show()
@@ -155,12 +155,12 @@ class IndicatorStickyNotes:
         self.menu.append(s)
         s.show()
 
-        self.mAbout = Gtk.MenuItem(_("About"))
+        self.mAbout = Gtk.MenuItem(label=_("About"))
         self.menu.append(self.mAbout)
         self.mAbout.connect("activate", self.show_about, None)
         self.mAbout.show()
 
-        self.mSettings = Gtk.MenuItem(_("Settings"))
+        self.mSettings = Gtk.MenuItem(label=_("Settings"))
         self.menu.append(self.mSettings)
         self.mSettings.connect("activate", self.show_settings, None)
         self.mSettings.show()
@@ -169,7 +169,7 @@ class IndicatorStickyNotes:
         self.menu.append(s)
         s.show()
 
-        self.mQuit = Gtk.MenuItem(_("Quit"))
+        self.mQuit = Gtk.MenuItem(label=_("Quit"))
         self.menu.append(self.mQuit)
         self.mQuit.connect("activate", Gtk.main_quit, None)
         self.mQuit.show()
